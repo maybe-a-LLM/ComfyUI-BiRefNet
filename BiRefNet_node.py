@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from collections import defaultdict
@@ -17,25 +18,31 @@ from torchvision import transforms
 
 from loguru import logger
 from folder_paths import models_dir
-from utils import check_download_model
+from brn_utils import check_download_model
 
 config = Config()
+
 
 class BiRefNet_img_processor:
     def __init__(self, config):
         self.config = config
         self.data_size = (config.size, config.size)
-        self.transform_image = transforms.Compose([
-            transforms.Resize(self.data_size),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
+        self.transform_image = transforms.Compose(
+            [
+                transforms.Resize(self.data_size),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
 
     def __call__(self, _image: np.array):
-        _image_rs = cv2.resize(_image, (self.config.size, self.config.size), interpolation=cv2.INTER_LINEAR)
-        _image_rs = Image.fromarray(np.uint8(_image_rs*255)).convert('RGB')
+        _image_rs = cv2.resize(
+            _image, (self.config.size, self.config.size), interpolation=cv2.INTER_LINEAR
+        )
+        _image_rs = Image.fromarray(np.uint8(_image_rs * 255)).convert("RGB")
         image = self.transform_image(_image_rs)
         return image
+
 
 class BiRefNet_node:
     def __init__(self):
@@ -43,17 +50,17 @@ class BiRefNet_node:
 
     def load(self, weight_path, device, verbose=False):
         try:
-            map_location = 'cpu' if device == 'cpu' else None
-            if device == 'mps' and torch.backends.mps.is_available():
-                map_location = torch.device('mps')
-                
+            map_location = "cpu" if device == "cpu" else None
+            if device == "mps" and torch.backends.mps.is_available():
+                map_location = torch.device("mps")
+
             self.model = BiRefNet()
             state_dict = torch.load(weight_path, map_location=map_location)
-            unwanted_prefix = '_orig_mod.'
+            unwanted_prefix = "_orig_mod."
             for k, v in list(state_dict.items()):
                 if k.startswith(unwanted_prefix):
-                    state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
-            
+                    state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+
             self.model.load_state_dict(state_dict)
             self.model.to(device)
             self.model.eval()
@@ -67,7 +74,6 @@ class BiRefNet_node:
             self.ready = False
             raise RuntimeError(f"Model loading failed: {e}")
 
-
     # Correctly move INPUT_TYPES to the class level
     @classmethod
     def INPUT_TYPES(cls):
@@ -75,15 +81,19 @@ class BiRefNet_node:
         return {
             "required": {
                 "image": ("IMAGE", {}),
-                "device": (["auto", "cpu", "mps"] + [f"cuda:{i}" for i in range(torch.cuda.device_count())], {"default": "auto"}),
+                "device": (
+                    ["auto", "cpu", "mps"]
+                    + [f"cuda:{i}" for i in range(torch.cuda.device_count())],
+                    {"default": "auto"},
+                ),
             },
             "optional": {
                 # Define optional inputs if any
-            }
+            },
         }
 
-    RETURN_TYPES = ("MASK", )
-    RETURN_NAMES = ("mask", )
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
     FUNCTION = "matting"
     CATEGORY = "Fooocus"
 
@@ -101,12 +111,12 @@ class BiRefNet_node:
             weight_path = os.path.join(models_dir, "BiRefNet", "BiRefNet-ep480.pth")
             check_download_model(weight_path)
             self.load(weight_path, device=device)
-        
+
         image = image.squeeze().numpy()
         img = self.processor(image)
         inputs = img[None, ...].to(device)
         logger.debug(f"{inputs.shape}")
-        
+
         with torch.no_grad():
             self.model.to(device)  # Move the model to the selected device
             scaled_preds = self.model(inputs)[-1].sigmoid()
@@ -114,8 +124,8 @@ class BiRefNet_node:
         res = nn.functional.interpolate(
             scaled_preds[0].unsqueeze(0),
             size=image.shape[:2],
-            mode='bilinear',
-            align_corners=True
+            mode="bilinear",
+            align_corners=True,
         )
         return res
 
